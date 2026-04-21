@@ -1,24 +1,429 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Biyoole MVP</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <h1>Biyoole</h1>
-  <div id="auth-section">
-    <input id="phone" placeholder="+252..." />
-    <button onclick="login()">Login</button>
-  </div>
-  <div id="app" style="display:none;">
-    <h2>Request Water</h2>
-    <input id="locationText" placeholder="Location description" />
-    <input id="quantity" placeholder="Fosto quantity" />
-    <button onclick="createJob()">Request</button>
-    <h2>Jobs</h2>
-    <ul id="jobsList"></ul>
-  </div>
-  <script type="module" src="app.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Biyoole MVP</title>
+    <!-- Tailwind CSS via CDN for rapid prototyping. In production consider bundling your own build. -->
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-50 min-h-screen flex flex-col">
+    <div id="root" class="flex-1"></div>
+    <!-- React and ReactDOM from unpkg. Using specific versions for reliability. -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- i18next and react-i18next for translations -->
+    <script src="https://unpkg.com/i18next@23.4.7/i18next.min.js"></script>
+    <script src="https://unpkg.com/react-i18next@13.2.1/umd/react-i18next.js"></script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+      // Import Firebase modules directly from gstatic CDN. Using modular SDK (v10) for tree-shaking.
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+      import {
+        getFirestore,
+        collection,
+        addDoc,
+        query,
+        where,
+        getDocs,
+        updateDoc,
+        doc,
+      } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+      import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+      // TODO: Replace with your own config if deploying your own instance. These values correspond to the user's existing project.
+      const firebaseConfig = {
+        apiKey: "AIzaSyDajsafysp-D5o7e4x03q9shL4lxMff63A",
+        authDomain: "biyoole-mvp.firebaseapp.com",
+        projectId: "biyoole-mvp",
+        storageBucket: "biyoole-mvp.firebasestorage.app",
+        messagingSenderId: "531213578286",
+        appId: "1:531213578286:web:7a703a8eb6bc8888dbafbf",
+      };
+      const app = initializeApp(firebaseConfig);
+      const db = getFirestore(app);
+      const auth = getAuth(app);
+
+      // Sign in anonymously on load for now. Phone login will be added in a later phase.
+      signInAnonymously(auth).catch((error) => {
+        console.error('Anonymous sign-in error:', error);
+      });
+
+      /**
+       * Translation configuration. We define translation keys for English and Somali.
+       */
+      const resources = {
+        en: {
+          translation: {
+            title: "Biyoole",
+            select_role: "Select your role",
+            customer: "Customer",
+            driver: "Driver",
+            admin: "Admin",
+            language_toggle: "Language",
+            customer_dashboard: "Customer Dashboard",
+            driver_dashboard: "Driver Dashboard",
+            admin_dashboard: "Admin Dashboard",
+            request_water: "Request Water",
+            location: "Location description",
+            quantity: "Fosto quantity",
+            submit: "Request",
+            jobs: "Jobs",
+            no_jobs: "No jobs available",
+            accept_job: "Accept Job",
+            accepted: "Accepted",
+            driver_activation: "Driver Activation",
+            active: "Active",
+            inactive: "Inactive",
+            activate: "Activate",
+            deactivate: "Deactivate",
+          },
+        },
+        so: {
+          translation: {
+            title: "Biyoole",
+            select_role: "Dooro doorkaaga",
+            customer: "Macmiil",
+            driver: "Darawal",
+            admin: "Maamule",
+            language_toggle: "Luuqad",
+            customer_dashboard: "Dashboard-ka Macmiil",
+            driver_dashboard: "Dashboard-ka Darawal",
+            admin_dashboard: "Dashboard-ka Maamule",
+            request_water: "Dalbo Biyo",
+            location: "Sharaxaada goobta",
+            quantity: "Tirada Fostooyinka",
+            submit: "Dalbo",
+            jobs: "Shaqooyin",
+            no_jobs: "Shaqooyin ma jiraan",
+            accept_job: "Qabo Shaqo",
+            accepted: "La qabtay",
+            driver_activation: "Kicinta Darawal",
+            active: "Firfircoon",
+            inactive: "Aan firfircoonayn",
+            activate: "Kici",
+            deactivate: "Dejiso",
+          },
+        },
+      };
+      i18next.init({
+        lng: 'en',
+        resources,
+      });
+
+      const { useState, useEffect } = React;
+      const { useTranslation, I18nextProvider } = window['react-i18next'];
+
+      /**
+       * Header component with title and language toggle.
+       */
+      function Header({ currentRole, setCurrentRole }) {
+        const { t, i18n } = useTranslation();
+        const changeLanguage = (lng) => {
+          i18n.changeLanguage(lng);
+        };
+        return (
+          <header className="bg-primary-600 text-white p-4 flex justify-between items-center shadow-md">
+            <h1 className="text-xl font-semibold">{t('title')}</h1>
+            <div className="flex items-center space-x-4">
+              <select
+                className="bg-primary-500 text-white px-2 py-1 rounded"
+                value={i18n.language}
+                onChange={(e) => changeLanguage(e.target.value)}
+              >
+                <option value="en">English</option>
+                <option value="so">Somali</option>
+              </select>
+            </div>
+          </header>
+        );
+      }
+
+      /**
+       * Role selector displayed on first load.
+       */
+      function RoleSelector({ setRole }) {
+        const { t } = useTranslation();
+        return (
+          <div className="flex flex-col items-center justify-center mt-20 space-y-4">
+            <h2 className="text-2xl font-semibold mb-4">{t('select_role')}</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-sm">
+              {['customer', 'driver', 'admin'].map((r) => (
+                <button
+                  key={r}
+                  className="bg-primary-500 text-white py-3 rounded-lg shadow hover:bg-primary-600 transition-colors"
+                  onClick={() => setRole(r)}
+                >
+                  {t(r)}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
+      /**
+       * Customer view: submit new water requests and see your requests.
+       */
+      function CustomerDashboard() {
+        const { t } = useTranslation();
+        const [location, setLocation] = useState('');
+        const [quantity, setQuantity] = useState('');
+        const [jobs, setJobs] = useState([]);
+
+        // Fetch jobs created by current anonymous user.
+        useEffect(() => {
+          async function fetchJobs() {
+            const user = auth.currentUser;
+            if (!user) return;
+            const q = query(collection(db, 'jobs'), where('rcUid', '==', user.uid));
+            const querySnapshot = await getDocs(q);
+            const list = [];
+            querySnapshot.forEach((docSnap) => {
+              list.push({ id: docSnap.id, ...docSnap.data() });
+            });
+            setJobs(list);
+          }
+          fetchJobs();
+        }, []);
+
+        async function submitRequest() {
+          const user = auth.currentUser;
+          if (!user) {
+            alert('Not signed in');
+            return;
+          }
+          await addDoc(collection(db, 'jobs'), {
+            rcUid: user.uid,
+            rcPhone: '', // phone will be added in next phase
+            locationText: location,
+            quantityFosto: parseInt(quantity, 10),
+            status: 'pending',
+            zone: '',
+            createdAt: new Date(),
+            assignedWtUid: null,
+          });
+          setLocation('');
+          setQuantity('');
+          // Refresh list
+          const q = query(collection(db, 'jobs'), where('rcUid', '==', user.uid));
+          const snap = await getDocs(q);
+          const updated = [];
+          snap.forEach((d) => updated.push({ id: d.id, ...d.data() }));
+          setJobs(updated);
+        }
+
+        return (
+          <div className="p-4 max-w-md mx-auto">
+            <h2 className="text-xl font-semibold mb-4">{t('customer_dashboard')}</h2>
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow mb-6">
+              <h3 className="text-lg font-medium mb-2">{t('request_water')}</h3>
+              <div className="space-y-3">
+                <input
+                  className="w-full px-3 py-2 border rounded"
+                  placeholder={t('location')}
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                />
+                <input
+                  className="w-full px-3 py-2 border rounded"
+                  type="number"
+                  placeholder={t('quantity')}
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                />
+                <button
+                  className="bg-primary-500 text-white px-4 py-2 rounded hover:bg-primary-600"
+                  onClick={submitRequest}
+                >
+                  {t('submit')}
+                </button>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+              <h3 className="text-lg font-medium mb-2">{t('jobs')}</h3>
+              {jobs.length === 0 ? (
+                <p>{t('no_jobs')}</p>
+              ) : (
+                <ul className="space-y-2">
+                  {jobs.map((job) => (
+                    <li key={job.id} className="p-3 bg-gray-100 dark:bg-gray-700 rounded flex justify-between">
+                      <span>{job.locationText} — {job.quantityFosto} Fosto</span>
+                      <span className="font-semibold capitalize">{job.status}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      /**
+       * Driver view: list available jobs and accept them.
+       */
+      function DriverDashboard() {
+        const { t } = useTranslation();
+        const [jobs, setJobs] = useState([]);
+        const [loading, setLoading] = useState(true);
+
+        useEffect(() => {
+          async function fetchJobs() {
+            const q = query(collection(db, 'jobs'), where('status', '==', 'pending'));
+            const snap = await getDocs(q);
+            const list = [];
+            snap.forEach((docSnap) => list.push({ id: docSnap.id, ...docSnap.data() }));
+            setJobs(list);
+            setLoading(false);
+          }
+          fetchJobs();
+        }, []);
+
+        async function acceptJob(jobId) {
+          const user = auth.currentUser;
+          if (!user) return;
+          const jobRef = doc(db, 'jobs', jobId);
+          await updateDoc(jobRef, {
+            status: 'accepted',
+            assignedWtUid: user.uid,
+          });
+          // Refresh list
+          const q = query(collection(db, 'jobs'), where('status', '==', 'pending'));
+          const snap = await getDocs(q);
+          const updated = [];
+          snap.forEach((d) => updated.push({ id: d.id, ...d.data() }));
+          setJobs(updated);
+        }
+
+        return (
+          <div className="p-4 max-w-md mx-auto">
+            <h2 className="text-xl font-semibold mb-4">{t('driver_dashboard')}</h2>
+            {loading ? (
+              <p>Loading...</p>
+            ) : jobs.length === 0 ? (
+              <p>{t('no_jobs')}</p>
+            ) : (
+              <ul className="space-y-2">
+                {jobs.map((job) => (
+                  <li key={job.id} className="p-3 bg-gray-100 dark:bg-gray-700 rounded flex justify-between items-center">
+                    <div>
+                      <p>{job.locationText}</p>
+                      <p className="text-sm text-gray-500">{job.quantityFosto} Fosto</p>
+                    </div>
+                    <button
+                      className="bg-primary-500 text-white px-3 py-1 rounded hover:bg-primary-600"
+                      onClick={() => acceptJob(job.id)}
+                    >
+                      {t('accept_job')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      }
+
+      /**
+       * Admin view: list drivers and allow activation toggles. For simplicity, this shows all users with role 'driver'.
+       * In a more robust system, roles would be stored in the user document. Here we assume current user is admin.
+       */
+      function AdminDashboard() {
+        const { t } = useTranslation();
+        const [drivers, setDrivers] = useState([]);
+
+        useEffect(() => {
+          async function fetchDrivers() {
+            // For now, we fetch all jobs and collect unique drivers.
+            const q = query(collection(db, 'jobs'), where('assignedWtUid', '!=', null));
+            const snap = await getDocs(q);
+            const map = new Map();
+            snap.forEach((docSnap) => {
+              const { assignedWtUid } = docSnap.data();
+              if (!map.has(assignedWtUid)) {
+                map.set(assignedWtUid, { id: assignedWtUid, active: true });
+              }
+            });
+            setDrivers(Array.from(map.values()));
+          }
+          fetchDrivers();
+        }, []);
+
+        function toggleActive(driverId) {
+          setDrivers((prev) =>
+            prev.map((d) => (d.id === driverId ? { ...d, active: !d.active } : d))
+          );
+        }
+
+        return (
+          <div className="p-4 max-w-md mx-auto">
+            <h2 className="text-xl font-semibold mb-4">{t('admin_dashboard')}</h2>
+            {drivers.length === 0 ? (
+              <p>No drivers yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {drivers.map((driver) => (
+                  <li key={driver.id} className="p-3 bg-gray-100 dark:bg-gray-700 rounded flex justify-between items-center">
+                    <span className="truncate">{driver.id}</span>
+                    <button
+                      className={`px-3 py-1 rounded ${driver.active ? 'bg-green-500' : 'bg-red-500'} text-white`}
+                      onClick={() => toggleActive(driver.id)}
+                    >
+                      {driver.active ? t('deactivate') : t('activate')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      }
+
+      function App() {
+        const [role, setRole] = useState(null);
+        return (
+          <div>
+            {role ? (
+              <div>
+                <Header currentRole={role} setCurrentRole={setRole} />
+                {role === 'customer' && <CustomerDashboard />}
+                {role === 'driver' && <DriverDashboard />}
+                {role === 'admin' && <AdminDashboard />}
+              </div>
+            ) : (
+              <div>
+                <Header />
+                <RoleSelector setRole={setRole} />
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        <I18nextProvider i18n={i18next}>
+          <App />
+        </I18nextProvider>
+      );
+    </script>
+    <style>
+      /* Primary colors defined as CSS variables for easy theming */
+      :root {
+        --tw-primary-500: #1d4ed8; /* Blue-600 */
+        --tw-primary-600: #1e40af; /* Blue-700 */
+      }
+      .bg-primary-500 {
+        background-color: var(--tw-primary-500);
+      }
+      .bg-primary-600 {
+        background-color: var(--tw-primary-600);
+      }
+      .text-primary-500 {
+        color: var(--tw-primary-500);
+      }
+      .text-primary-600 {
+        color: var(--tw-primary-600);
+      }
+    </style>
+  </body>
 </html>
